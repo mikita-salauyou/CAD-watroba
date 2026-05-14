@@ -1,0 +1,15 @@
+# IRCAD / DICOM datasets (large; keep local only)
+3Dircadb1/
+
+# MATLAB
+*.asv
+*.mex*
+slprj/
+resources/project/
+
+# OS / editor
+Thumbs.db
+Desktop.ini
+*.swp
+.vscode/
+.idea/

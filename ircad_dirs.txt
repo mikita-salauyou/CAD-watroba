@@ -1,0 +1,6 @@
+﻿C:\New project\CAD watroba\3Dircadb1\3Dircadb1\3Dircadb1.8\LABELLED_DICOM
+C:\New project\CAD watroba\3Dircadb1\3Dircadb1\3Dircadb1.8\LABELLED_DICOM\LABELLED_DICOM
+C:\New project\CAD watroba\3Dircadb1\3Dircadb1\3Dircadb1.8\MASKS_DICOM
+C:\New project\CAD watroba\3Dircadb1\3Dircadb1\3Dircadb1.8\MASKS_DICOM\MASKS_DICOM
+C:\New project\CAD watroba\3Dircadb1\3Dircadb1\3Dircadb1.8\PATIENT_DICOM
+C:\New project\CAD watroba\3Dircadb1\3Dircadb1\3Dircadb1.8\PATIENT_DICOM\PATIENT_DICOM
