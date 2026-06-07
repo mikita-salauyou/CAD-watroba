@@ -51,8 +51,10 @@ classdef KWODApp < handle
         OpenDicomBtn
         ManualLiverBtn
         ManualLesionBtn
+        EraserBtn
         InterpolateBtn
         ClearMasksBtn
+        ClearSliceBtn
         RulerBtn
         CircleBtn
         ClearMeasureBtn
@@ -126,10 +128,10 @@ classdef KWODApp < handle
             gl.BackgroundColor = [0.08, 0.09, 0.13];
 
             % --- Top toolbar: DICOM + manual segmentation only --------
-            topBar = uigridlayout(gl, [1, 7]);
+            topBar = uigridlayout(gl, [1, 9]);
             topBar.Layout.Row = 1;
             topBar.Layout.Column = [1, 2];
-            topBar.ColumnWidth = {170, 130, 140, 120, 120, "1x", 220};
+            topBar.ColumnWidth = {160, 110, 110, 80, 100, 90, 90, "1x", 160};
             topBar.RowHeight = {"1x"};
             topBar.Padding = [0, 0, 0, 0];
             topBar.BackgroundColor = [0.08, 0.09, 0.13];
@@ -153,29 +155,41 @@ classdef KWODApp < handle
                 "ButtonPushedFcn", @(~, ~) app.onManualDraw("lesion"));
             app.ManualLesionBtn.Layout.Column = 3;
 
+            app.EraserBtn = uibutton(topBar, ...
+                "Text", "Eraser", ...
+                "BackgroundColor", [0.8, 0.6, 0.1], ... 
+                "FontColor", [1.0, 1.0, 1.0], ...
+                "ButtonPushedFcn", @(~, ~) app.onEraserDraw());
+            app.EraserBtn.Layout.Column = 4;
+
             app.InterpolateBtn = uibutton(topBar, ...
                 "Text", "Interpolate", ...
                 "BackgroundColor", [0.25, 0.30, 0.55], ...
                 "FontColor", [0.95, 0.97, 1.0], ...
                 "ButtonPushedFcn", @(~, ~) app.onInterpolateMasks());
-            app.InterpolateBtn.Layout.Column = 4;
+            app.InterpolateBtn.Layout.Column = 5;
 
             app.ClearMasksBtn = uibutton(topBar, ...
-                "Text", "Clear masks", ...
+                "Text", "Clear all", ...
                 "ButtonPushedFcn", @(~, ~) app.onClearMasks());
-            app.ClearMasksBtn.Layout.Column = 5;
+            app.ClearMasksBtn.Layout.Column = 6;
+
+            app.ClearSliceBtn = uibutton(topBar, ...
+                "Text", "Clear slice", ...
+                "ButtonPushedFcn", @(~, ~) app.onClearCurrentSlice());
+            app.ClearSliceBtn.Layout.Column = 7;
 
             app.StatusLabel = uilabel(topBar, ...
                 "Text", "No study loaded", ...
                 "FontColor", [0.65, 0.72, 0.9], ...
                 "HorizontalAlignment", "left");
-            app.StatusLabel.Layout.Column = 6;
+            app.StatusLabel.Layout.Column = 8;
 
             wwLabel = uilabel(topBar, ...
                 "Text", sprintf("WL %d / WW %d", app.WindowLevel, app.WindowWidth), ...
                 "FontColor", [0.78, 0.85, 1.0], ...
                 "HorizontalAlignment", "right");
-            wwLabel.Layout.Column = 7;
+            wwLabel.Layout.Column = 9;
 
             % --- Second toolbar: review tools ------------------------
             toolBar = uigridlayout(gl, [1, 13]);
@@ -488,6 +502,118 @@ classdef KWODApp < handle
             app.setStatus("Masks, keyframes and resection cleared.");
         end
 
+        function onClearCurrentSlice(app)
+            if isempty(fieldnames(app.Study))
+                return;
+            end
+            z = app.CurrentZ;
+            didClear = false;
+            if ~isempty(app.MaskLiver) && any(app.MaskLiver(z, :, :), "all")
+                app.MaskLiver(z, :, :) = false;
+                app.LiverKeyframes(app.LiverKeyframes == z) = [];
+                didClear = true;
+            end
+            if ~isempty(app.MaskLesion) && any(app.MaskLesion(z, :, :), "all")
+                app.MaskLesion(z, :, :) = false;
+                app.LesionKeyframes(app.LesionKeyframes == z) = [];
+                didClear = true;
+            end
+            if ~isempty(app.ResectionVolume3D) && size(app.ResectionVolume3D, 1) >= z && any(app.ResectionVolume3D(z, :, :), "all")
+                app.ResectionVolume3D(z, :, :) = false;
+                app.ResectionKeyframes(app.ResectionKeyframes == z) = [];
+                app.recomputeResectionFromVolume();
+                didClear = true;
+            end
+            if didClear
+                app.renderSlice();        
+                app.updateMetrics();      
+                app.updateSliceLabel();   
+                app.setStatus(sprintf("Cleared all masks on slice %d.", z));
+            else
+                app.setStatus(sprintf("No masks to clear on slice %d.", z));
+            end
+        end
+
+        function onEraserDraw(app)
+            if isempty(fieldnames(app.Study))
+                return;
+            end
+
+            z = app.CurrentZ;
+            app.setStatus(sprintf( ...
+                "Eraser on slice %d: PRESS LMB and DRAG around the area to remove, RELEASE to finish.", z));
+            drawnow;
+
+            roi = [];
+            try
+                roi = drawfreehand(app.Ax, ...
+                    "Color", [0.9, 0.8, 0.2], ... 
+                    "LineWidth", 2.5, ...
+                    "Smoothing", 2, ...
+                    "Closed", true, ...
+                    "FaceAlpha", 0.0, ...
+                    "InteractionsAllowed", "none");
+            catch ex
+                app.setStatus(sprintf("Eraser failed: %s", ex.message));
+                return;
+            end
+
+            if isempty(roi) || ~isvalid(roi) || ...
+                    isempty(roi.Position) || size(roi.Position, 1) < 3
+                if ~isempty(roi) && isvalid(roi)
+                    delete(roi);
+                end
+                app.setStatus("Eraser cancelled.");
+                return;
+            end
+
+            try
+                mask2d = createMask(roi, app.ImgHandle);
+            catch
+                mask2d = createMask(roi);
+            end
+            delete(roi);
+
+            if isempty(mask2d) || ~any(mask2d, "all")
+                app.setStatus("Eraser produced an empty area.");
+                return;
+            end
+
+            sz = app.Study.shapeZYX;
+            if ~isequal(size(mask2d), [sz(2), sz(3)])
+                return;
+            end
+
+            didErase = false;
+
+            if ~isempty(app.MaskLiver) && any(app.MaskLiver(z, :, :), "all")
+                sliceLiver = squeeze(app.MaskLiver(z, :, :));
+                app.MaskLiver(z, :, :) = sliceLiver & ~mask2d;
+                didErase = true;
+            end
+
+            if ~isempty(app.MaskLesion) && any(app.MaskLesion(z, :, :), "all")
+                sliceLesion = squeeze(app.MaskLesion(z, :, :));
+                app.MaskLesion(z, :, :) = sliceLesion & ~mask2d;
+                didErase = true;
+            end
+
+            if ~isempty(app.ResectionVolume3D) && size(app.ResectionVolume3D, 1) >= z && any(app.ResectionVolume3D(z, :, :), "all")
+                sliceResect = squeeze(app.ResectionVolume3D(z, :, :));
+                app.ResectionVolume3D(z, :, :) = sliceResect & ~mask2d;
+                app.recomputeResectionFromVolume();
+                didErase = true;
+            end
+
+            if didErase
+                app.renderSlice();
+                app.updateMetrics();
+                app.setStatus(sprintf("Erased selected area on slice %d.", z));
+            else
+                app.setStatus("No masks to erase in the selected area.");
+            end
+        end
+
         % ================ Manual polygon segmentation ===================
 
         function onManualDraw(app, target)
@@ -543,12 +669,10 @@ classdef KWODApp < handle
                 mask2d = createMask(roi);
             end
             delete(roi);
-
             if isempty(mask2d) || ~any(mask2d, "all")
                 app.setStatus("Manual draw produced an empty mask - try again with a larger contour.");
                 return;
             end
-
             % Sanity: align mask size with slice [Y, X]
             sz = app.Study.shapeZYX;
             if ~isequal(size(mask2d), [sz(2), sz(3)])
@@ -557,6 +681,40 @@ classdef KWODApp < handle
                     size(mask2d, 1), size(mask2d, 2), sz(2), sz(3)));
                 return;
             end
+            app.setStatus(sprintf("Refining %s contour (Active Contours)...", target));
+            drawnow;
+
+            sl = squeeze(app.Study.volumeZYX(z, :, :));
+            wl = app.WindowLevel;
+            ww = max(1.0, app.WindowWidth);
+            lo = wl - ww / 2;
+            hi = wl + ww / 2;
+            imgDisp = (min(max(sl, lo), hi) - lo) ./ (hi - lo);
+
+            if target == "liver"
+                maxDilation = 12;
+                allowedZone = imdilate(mask2d, strel('disk', maxDilation));
+                imgDisp(~allowedZone) = 0; 
+                
+                numIterations = 50; 
+                mask2d = activecontour(imgDisp, mask2d, numIterations, 'Chan-Vese', ...
+                    'SmoothFactor', 1.5);
+            else
+                maxDilation = 8; 
+                allowedZone = imdilate(mask2d, strel('disk', maxDilation));
+                imgDisp(~allowedZone) = 0;
+                
+                numIterations = 35; 
+                mask2d = activecontour(imgDisp, mask2d, numIterations, 'edge', ...
+                    'SmoothFactor', 1.0, ...
+                    'ContractionBias', 0.1);
+            end
+            
+            if ~any(mask2d, "all")
+                app.setStatus("Active contour collapsed to zero. Try drawing closer to the edge.");
+                return;
+            end
+          
 
             if target == "liver"
                 app.MaskLiver(z, :, :) = mask2d;
@@ -601,47 +759,43 @@ classdef KWODApp < handle
         end
 
         function onInterpolateMasks(app)
-            % Fill missing slices between manual keyframes via SDF interpolation.
+            % Fill missing slices and extrapolate from keyframes.
             if isempty(fieldnames(app.Study))
                 return;
             end
-
             didLiver = false;
             didLesion = false;
             didResect = false;
-
+            
             if numel(app.LiverKeyframes) >= 2
                 app.MaskLiver = kwod.interpolateKeyframes( ...
-                    app.MaskLiver, app.LiverKeyframes);
+                    app.MaskLiver, app.LiverKeyframes, 'target', "liver");
                 didLiver = true;
             end
             if numel(app.LesionKeyframes) >= 2
                 app.MaskLesion = kwod.interpolateKeyframes( ...
-                    app.MaskLesion, app.LesionKeyframes);
+                    app.MaskLesion, app.LesionKeyframes, 'target', "lesion", ...
+                    'liverKeyframes', app.LiverKeyframes); 
                 didLesion = true;
-                % Do NOT clip lesion to liver mask here: the user is the
-                % source of truth for what the lesion is. If the liver
-                % mask is incomplete, clipping would erase legitimate
-                % lesion voxels on intermediate slices.
             end
             if numel(app.ResectionKeyframes) >= 2 && ...
                     ~isempty(app.ResectionVolume3D)
                 app.ResectionVolume3D = kwod.interpolateKeyframes( ...
-                    app.ResectionVolume3D, app.ResectionKeyframes);
+                    app.ResectionVolume3D, app.ResectionKeyframes, 'target', "liver");
                 app.recomputeResectionFromVolume();
                 didResect = true;
             end
-
+            
             if ~didLiver && ~didLesion && ~didResect
                 uialert(app.Fig, ...
                     "Need at least 2 manual keyframes (liver, lesion or resect contour).", ...
                     "Not enough keyframes");
                 return;
             end
-
+            
             app.renderSlice();
             app.updateMetrics();
-
+            
             parts = strings(0, 1);
             if didLiver
                 parts(end + 1, 1) = sprintf("liver: %d->%d", ...
@@ -651,7 +805,7 @@ classdef KWODApp < handle
                 parts(end + 1, 1) = sprintf("lesion: %d->%d", ...
                     min(app.LesionKeyframes), max(app.LesionKeyframes));
             end
-            app.setStatus("Interpolated " + strjoin(parts, ", ") + ".");
+            app.setStatus("Interpolated & Extrapolated " + strjoin(parts, ", ") + ".");
         end
 
         % ================ Measurements =================================
