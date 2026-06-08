@@ -8,8 +8,10 @@
 !3Dircadb1/3Dircadb1/3Dircadb1.2/**
 
 # Build / temp artifacts
-_tools/frames/
-_tools/*_log.txt
+_tools/
+ircad_dirs.txt
+scan.txt
+raport/media/
 
 # MATLAB
 *.asv
