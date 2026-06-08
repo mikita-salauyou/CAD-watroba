@@ -34,11 +34,6 @@ classdef KWODApp < handle
         RefLiverColor = [0.10, 0.30, 0.90]   % deep saturated blue
         RefLesionColor = [0.85, 0.05, 0.55]  % deep saturated magenta
 
-        % Resection: yellow line for the cut, remove side gets warm orange
-        ResectionLineColor = [1.00, 0.92, 0.20]
-        ResectionRemoveColor = [1.00, 0.55, 0.10]
-        ResectionRemoveAlpha = 0.40
-
         LabelFontSize = 13
         RulerLineWidth = 2.5
         RoiLineWidth = 2.5
@@ -59,14 +54,9 @@ classdef KWODApp < handle
         CircleBtn
         ClearMeasureBtn
         LoadRefBtn
-        ResectionBtn
-        ResectionVolumeBtn
-        FlipResectionBtn
-        ClearResectionBtn
         ShowLiverCb
         ShowLesionCb
         ShowRefCb
-        ShowResectionCb
         SliceSlider
         SliceLabel
         PrevBigBtn
@@ -89,19 +79,6 @@ classdef KWODApp < handle
         Measurements cell = {}
         CurrentZ double = 1
         % Seed mode removed (manual-only workflow)
-
-        % --- Virtual resection ------------------------------------------
-        % Two complementary modes share the same display masks:
-        %   (a) planar (line)  -> ResectionPlane = struct(.points, .side)
-        %   (b) volumetric     -> ResectionVolume3D + ResectionKeyframes
-        % The latter mirrors the manual lesion workflow: draw freehand on
-        % a few slices, then Interpolate to fill the cavity in 3D.
-        ResectionPlane struct = struct()    % .points (2x2), .side (+1/-1)
-        ResectionVolume3D logical = logical.empty
-        ResectionKeyframes double = []
-        ResectionRemoveMask logical = logical.empty
-        ResectionKeepMask logical = logical.empty
-        ResectionMeta struct = struct()     % volumes, FLR %, risk tag
     end
 
     methods
@@ -192,11 +169,10 @@ classdef KWODApp < handle
             wwLabel.Layout.Column = 9;
 
             % --- Second toolbar: review tools ------------------------
-            toolBar = uigridlayout(gl, [1, 13]);
+            toolBar = uigridlayout(gl, [1, 8]);
             toolBar.Layout.Row = 2;
             toolBar.Layout.Column = [1, 2];
-            toolBar.ColumnWidth = {90, 100, 80, 95, 70, 90, 110, 165, ...
-                                   105, 110, 70, 105, "1x"};
+            toolBar.ColumnWidth = {90, 100, 80, 70, 90, 110, 165, "1x"};
             toolBar.RowHeight = {"1x"};
             toolBar.Padding = [0, 0, 0, 0];
             toolBar.BackgroundColor = [0.08, 0.09, 0.13];
@@ -222,66 +198,25 @@ classdef KWODApp < handle
                 "ValueChangedFcn", @(~, ~) app.renderSlice());
             app.ShowRefCb.Layout.Column = 3;
 
-            app.ShowResectionCb = uicheckbox(toolBar, ...
-                "Text", "Show resect", ...
-                "Value", true, ...
-                "FontColor", [1.00, 0.80, 0.30], ...
-                "ValueChangedFcn", @(~, ~) app.renderSlice());
-            app.ShowResectionCb.Layout.Column = 4;
-
             app.RulerBtn = uibutton(toolBar, ...
                 "Text", "Ruler", ...
                 "ButtonPushedFcn", @(~, ~) app.onAddRuler());
-            app.RulerBtn.Layout.Column = 5;
+            app.RulerBtn.Layout.Column = 4;
 
             app.CircleBtn = uibutton(toolBar, ...
                 "Text", "Circle ROI", ...
                 "ButtonPushedFcn", @(~, ~) app.onAddCircle());
-            app.CircleBtn.Layout.Column = 6;
+            app.CircleBtn.Layout.Column = 5;
 
             app.ClearMeasureBtn = uibutton(toolBar, ...
                 "Text", "Clear measures", ...
                 "ButtonPushedFcn", @(~, ~) app.onClearMeasurements());
-            app.ClearMeasureBtn.Layout.Column = 7;
+            app.ClearMeasureBtn.Layout.Column = 6;
 
             app.LoadRefBtn = uibutton(toolBar, ...
                 "Text", "Load reference (IRCAD)", ...
                 "ButtonPushedFcn", @(~, ~) app.onLoadReference());
-            app.LoadRefBtn.Layout.Column = 8;
-
-            app.ResectionBtn = uibutton(toolBar, ...
-                "Text", "Cut (line)", ...
-                "BackgroundColor", [0.50, 0.40, 0.10], ...
-                "FontColor", [1.00, 0.95, 0.80], ...
-                "Tooltip", ...
-                    "Draw a single line on this slice. The line is extruded along Z " + ...
-                    "and splits the liver into REMOVE / KEEP halves.", ...
-                "ButtonPushedFcn", @(~, ~) app.onDefineResection());
-            app.ResectionBtn.Layout.Column = 9;
-
-            app.ResectionVolumeBtn = uibutton(toolBar, ...
-                "Text", "Cut (volume)", ...
-                "BackgroundColor", [0.55, 0.30, 0.10], ...
-                "FontColor", [1.00, 0.95, 0.80], ...
-                "Tooltip", ...
-                    "Draw a freehand contour around the resection cavity on this slice. " + ...
-                    "Repeat on a few slices, then press Interpolate. " + ...
-                    "Builds a true 3D resection volume.", ...
-                "ButtonPushedFcn", @(~, ~) app.onDefineResectionContour());
-            app.ResectionVolumeBtn.Layout.Column = 10;
-
-            app.FlipResectionBtn = uibutton(toolBar, ...
-                "Text", "Flip", ...
-                "BackgroundColor", [0.30, 0.25, 0.10], ...
-                "FontColor", [1.00, 0.95, 0.80], ...
-                "Tooltip", "Flip which side of the line is REMOVE (planar cut only).", ...
-                "ButtonPushedFcn", @(~, ~) app.onFlipResection());
-            app.FlipResectionBtn.Layout.Column = 11;
-
-            app.ClearResectionBtn = uibutton(toolBar, ...
-                "Text", "Clear resect", ...
-                "ButtonPushedFcn", @(~, ~) app.onClearResection());
-            app.ClearResectionBtn.Layout.Column = 12;
+            app.LoadRefBtn.Layout.Column = 7;
 
             % --- Axes ------------------------------------------------
             app.Ax = uiaxes(gl);
@@ -403,22 +338,18 @@ classdef KWODApp < handle
         % ================ Loading ======================================
 
         function tf = confirmDiscardWork(app)
-            % Ask before throwing away masks / measurements / resection.
+            % Ask before throwing away masks / measurements.
             % Returns true if user wants to continue.
             hasWork = (~isempty(app.MaskLiver) && any(app.MaskLiver, "all")) || ...
                       (~isempty(app.MaskLesion) && any(app.MaskLesion, "all")) || ...
-                      ~isempty(app.Measurements) || ...
-                      isfield(app.ResectionPlane, "points");
+                      ~isempty(app.Measurements);
             if ~hasWork
                 tf = true;
                 return;
             end
             res = uiconfirm(app.Fig, ...
-                "Loading a NEW study will discard the current masks, " + ...
-                "measurements and resection. Continue?" + newline + newline + ...
-                "Tip: to load an ML PREDICTION on top of the current CT " + ...
-                "without losing your work, use 'Load mask (NIfTI)...' " + ...
-                "in the side panel instead.", ...
+                "Loading a NEW study will discard the current masks and " + ...
+                "measurements. Continue?", ...
                 "Discard current work?", ...
                 "Options", ["Discard and load", "Cancel"], ...
                 "DefaultOption", "Cancel", ...
@@ -464,12 +395,6 @@ classdef KWODApp < handle
             app.RefInfo = struct();
             app.Measurements = {};
             % manual-only
-            app.ResectionPlane = struct();
-            app.ResectionVolume3D = logical.empty;
-            app.ResectionKeyframes = [];
-            app.ResectionRemoveMask = logical.empty;
-            app.ResectionKeepMask = logical.empty;
-            app.ResectionMeta = struct();
 
             app.CurrentZ = max(1, round(app.Study.shapeZYX(1) / 2));
             app.SliceSlider.Limits = [1, max(2, app.Study.shapeZYX(1))];
@@ -489,17 +414,9 @@ classdef KWODApp < handle
             app.LiverKeyframes = [];
             app.LesionKeyframes = [];
             % manual-only
-            % Resection depends on the liver mask, so clearing masks
-            % invalidates it.
-            app.ResectionPlane = struct();
-            app.ResectionVolume3D = logical.empty;
-            app.ResectionKeyframes = [];
-            app.ResectionRemoveMask = logical.empty;
-            app.ResectionKeepMask = logical.empty;
-            app.ResectionMeta = struct();
             app.renderSlice();
             app.updateMetrics();
-            app.setStatus("Masks, keyframes and resection cleared.");
+            app.setStatus("Masks and keyframes cleared.");
         end
 
         function onClearCurrentSlice(app)
@@ -516,12 +433,6 @@ classdef KWODApp < handle
             if ~isempty(app.MaskLesion) && any(app.MaskLesion(z, :, :), "all")
                 app.MaskLesion(z, :, :) = false;
                 app.LesionKeyframes(app.LesionKeyframes == z) = [];
-                didClear = true;
-            end
-            if ~isempty(app.ResectionVolume3D) && size(app.ResectionVolume3D, 1) >= z && any(app.ResectionVolume3D(z, :, :), "all")
-                app.ResectionVolume3D(z, :, :) = false;
-                app.ResectionKeyframes(app.ResectionKeyframes == z) = [];
-                app.recomputeResectionFromVolume();
                 didClear = true;
             end
             if didClear
@@ -595,13 +506,6 @@ classdef KWODApp < handle
             if ~isempty(app.MaskLesion) && any(app.MaskLesion(z, :, :), "all")
                 sliceLesion = squeeze(app.MaskLesion(z, :, :));
                 app.MaskLesion(z, :, :) = sliceLesion & ~mask2d;
-                didErase = true;
-            end
-
-            if ~isempty(app.ResectionVolume3D) && size(app.ResectionVolume3D, 1) >= z && any(app.ResectionVolume3D(z, :, :), "all")
-                sliceResect = squeeze(app.ResectionVolume3D(z, :, :));
-                app.ResectionVolume3D(z, :, :) = sliceResect & ~mask2d;
-                app.recomputeResectionFromVolume();
                 didErase = true;
             end
 
@@ -765,7 +669,6 @@ classdef KWODApp < handle
             end
             didLiver = false;
             didLesion = false;
-            didResect = false;
             
             if numel(app.LiverKeyframes) >= 2
                 app.MaskLiver = kwod.interpolateKeyframes( ...
@@ -778,17 +681,10 @@ classdef KWODApp < handle
                     'liverKeyframes', app.LiverKeyframes); 
                 didLesion = true;
             end
-            if numel(app.ResectionKeyframes) >= 2 && ...
-                    ~isempty(app.ResectionVolume3D)
-                app.ResectionVolume3D = kwod.interpolateKeyframes( ...
-                    app.ResectionVolume3D, app.ResectionKeyframes, 'target', "liver");
-                app.recomputeResectionFromVolume();
-                didResect = true;
-            end
             
-            if ~didLiver && ~didLesion && ~didResect
+            if ~didLiver && ~didLesion
                 uialert(app.Fig, ...
-                    "Need at least 2 manual keyframes (liver, lesion or resect contour).", ...
+                    "Need at least 2 manual keyframes (liver or lesion).", ...
                     "Not enough keyframes");
                 return;
             end
@@ -988,261 +884,6 @@ classdef KWODApp < handle
                 ref.liverFolder, n));
         end
 
-        % ================ Virtual resection ============================
-
-        function onDefineResection(app)
-            % Draw a line on the current axial slice that defines a
-            % vertical (Z-aligned) cutting plane for the liver.
-            if isempty(fieldnames(app.Study))
-                uialert(app.Fig, "Load a CT study first.", "No study");
-                return;
-            end
-            if ~any(app.MaskLiver, "all")
-                uialert(app.Fig, ...
-                    "Segment or draw the liver first - resection cuts the liver mask.", ...
-                    "No liver mask");
-                return;
-            end
-            % manual-only
-
-            % Switching to planar mode invalidates the volumetric one.
-            if ~isempty(app.ResectionVolume3D) && any(app.ResectionVolume3D, "all")
-                app.ResectionVolume3D = logical.empty;
-                app.ResectionKeyframes = [];
-            end
-
-            app.setStatus("Resection (line): draw a line across the liver to define the cut plane.");
-            drawnow;
-
-            roi = [];
-            try
-                roi = drawline(app.Ax, ...
-                    "Color", app.ResectionLineColor, ...
-                    "LineWidth", 3);
-            catch ex
-                app.setStatus(sprintf("Resection draw failed: %s", ex.message));
-                return;
-            end
-
-            if isempty(roi) || ~isvalid(roi) || ...
-                    isempty(roi.Position) || size(roi.Position, 1) < 2 || ...
-                    norm(diff(roi.Position, 1, 1)) < 5
-                if ~isempty(roi) && isvalid(roi)
-                    delete(roi);
-                end
-                app.setStatus("Resection cancelled (need a longer line).");
-                return;
-            end
-
-            pts = roi.Position;  % [x1 y1; x2 y2]
-            delete(roi);
-
-            plane = struct();
-            plane.points = [pts(1, 2), pts(1, 1); pts(2, 2), pts(2, 1)];
-            plane.side = 1;
-
-            app.applyResection(plane);
-        end
-
-        function onDefineResectionContour(app)
-            % Manual freehand contour for VOLUMETRIC resection. User draws
-            % the resection cavity on the current slice. After 2+ contours
-            % across slices, press the global Interpolate button to fill
-            % the gaps via SDF interpolation -> a true 3D resection volume.
-            if isempty(fieldnames(app.Study))
-                uialert(app.Fig, "Load a CT study first.", "No study");
-                return;
-            end
-            if ~any(app.MaskLiver, "all")
-                uialert(app.Fig, ...
-                    "Segment or draw the liver first - the resection volume is intersected with the liver.", ...
-                    "No liver mask");
-                return;
-            end
-            % manual-only
-
-            % Switching to volumetric mode invalidates the planar plane.
-            if isfield(app.ResectionPlane, "points")
-                app.ResectionPlane = struct();
-            end
-
-            % Lazily initialise the 3D mask now that we know the shape.
-            sz = app.Study.shapeZYX;
-            if isempty(app.ResectionVolume3D) || ...
-                    ~isequal(size(app.ResectionVolume3D), sz)
-                app.ResectionVolume3D = false(sz);
-                app.ResectionKeyframes = [];
-            end
-
-            z = app.CurrentZ;
-            app.setStatus(sprintf( ...
-                "Resect contour on slice %d: PRESS LMB and DRAG around the cavity, RELEASE to finish.", z));
-            drawnow;
-
-            roi = [];
-            try
-                roi = drawfreehand(app.Ax, ...
-                    "Color", app.ResectionRemoveColor, ...
-                    "LineWidth", 2.5, ...
-                    "Smoothing", 2, ...
-                    "Closed", true, ...
-                    "FaceAlpha", 0.0, ...
-                    "InteractionsAllowed", "none");
-            catch ex
-                app.setStatus(sprintf("Resect contour failed: %s", ex.message));
-                return;
-            end
-
-            if isempty(roi) || ~isvalid(roi) || ...
-                    isempty(roi.Position) || size(roi.Position, 1) < 3
-                if ~isempty(roi) && isvalid(roi)
-                    delete(roi);
-                end
-                app.setStatus("Resect contour cancelled (too few points).");
-                return;
-            end
-
-            try
-                mask2d = createMask(roi, app.ImgHandle);
-            catch
-                mask2d = createMask(roi);
-            end
-            delete(roi);
-
-            if isempty(mask2d) || ~any(mask2d, "all")
-                app.setStatus("Resect contour produced an empty mask - try again.");
-                return;
-            end
-            if ~isequal(size(mask2d), [sz(2), sz(3)])
-                app.setStatus(sprintf( ...
-                    "Resect contour size mismatch [%d %d] vs slice [%d %d] - ignored.", ...
-                    size(mask2d, 1), size(mask2d, 2), sz(2), sz(3)));
-                return;
-            end
-
-            app.ResectionVolume3D(z, :, :) = mask2d;
-            app.ResectionKeyframes = sort(unique([app.ResectionKeyframes, z]));
-
-            app.recomputeResectionFromVolume();
-
-            voxCm3 = prod(app.Study.spacingXYZmm) / 1000;
-            volCm3 = app.ResectionMeta.removeVolumeCm3;
-            app.setStatus(sprintf( ...
-                "Resect contour SAVED on slice %d. %d keyframes total. " + ...
-                "Current REMOVE: %.1f cm^3. Press Interpolate to fill the gap.", ...
-                z, numel(app.ResectionKeyframes), volCm3));
-        end
-
-        function onFlipResection(app)
-            if ~isfield(app.ResectionPlane, "points")
-                if ~isempty(app.ResectionVolume3D) && any(app.ResectionVolume3D, "all")
-                    app.setStatus("Flip is for the planar cut. In volumetric mode, redraw the contour on the other side.");
-                else
-                    app.setStatus("No resection plane defined - press 'Cut (line)' first.");
-                end
-                return;
-            end
-            plane = app.ResectionPlane;
-            plane.side = -plane.side;
-            app.applyResection(plane);
-        end
-
-        function onClearResection(app)
-            app.ResectionPlane = struct();
-            app.ResectionVolume3D = logical.empty;
-            app.ResectionKeyframes = [];
-            app.ResectionRemoveMask = logical.empty;
-            app.ResectionKeepMask = logical.empty;
-            app.ResectionMeta = struct();
-            app.renderSlice();
-            app.updateMetrics();
-            app.setStatus("Resection cleared (line + volume).");
-        end
-
-        function applyResection(app, plane)
-            try
-                [removeMask, keepMask, meta] = kwod.applyResectionPlane( ...
-                    app.MaskLiver, plane, app.Study.spacingXYZmm);
-            catch ex
-                uialert(app.Fig, ex.message, "Resection error");
-                app.setStatus("Resection failed.");
-                return;
-            end
-
-            app.ResectionPlane = plane;
-            app.ResectionRemoveMask = removeMask;
-            app.ResectionKeepMask = keepMask;
-            app.ResectionMeta = app.augmentResectionMeta(meta);
-
-            app.renderSlice();
-            app.updateMetrics();
-
-            totalCm3 = meta.removeVolumeCm3 + meta.keepVolumeCm3;
-            pctRemove = 100 * meta.removeVolumeCm3 / max(totalCm3, eps);
-            app.setStatus(sprintf( ...
-                "Resection: REMOVE %.1f cm^3 (%.1f %%) | KEEP %.1f cm^3. Flip swaps sides.", ...
-                meta.removeVolumeCm3, pctRemove, meta.keepVolumeCm3));
-        end
-
-        function recomputeResectionFromVolume(app)
-            % Update remove/keep masks + volumes from ResectionVolume3D.
-            if isempty(app.ResectionVolume3D) || ~any(app.ResectionVolume3D, "all")
-                app.ResectionRemoveMask = logical.empty;
-                app.ResectionKeepMask = logical.empty;
-                app.ResectionMeta = struct();
-                return;
-            end
-            if ~any(app.MaskLiver, "all")
-                app.ResectionRemoveMask = logical.empty;
-                app.ResectionKeepMask = logical.empty;
-                app.ResectionMeta = struct();
-                return;
-            end
-            removeMask = app.MaskLiver & app.ResectionVolume3D;
-            keepMask = app.MaskLiver & ~app.ResectionVolume3D;
-
-            voxVolMm3 = prod(app.Study.spacingXYZmm);
-            meta = struct();
-            meta.removeVoxels = nnz(removeMask);
-            meta.keepVoxels = nnz(keepMask);
-            meta.removeVolumeCm3 = meta.removeVoxels * voxVolMm3 / 1000;
-            meta.keepVolumeCm3 = meta.keepVoxels * voxVolMm3 / 1000;
-
-            app.ResectionRemoveMask = removeMask;
-            app.ResectionKeepMask = keepMask;
-            app.ResectionMeta = app.augmentResectionMeta(meta);
-            app.renderSlice();
-            app.updateMetrics();
-        end
-
-        function meta = augmentResectionMeta(app, meta)
-            % Add Future Liver Remnant (FLR) % and a clinical safety tag.
-            % Reference (general guidance, NOT clinical authority):
-            %   FLR / total liver:
-            %     >= 40 %  - safe (typical for normal parenchyma)
-            %     30-40 %  - acceptable (most patients without underlying disease)
-            %     25-30 %  - borderline (caution: needs full preoperative workup)
-            %     < 25 %   - high risk (typically contraindicated without PVE)
-            tot = meta.removeVolumeCm3 + meta.keepVolumeCm3;
-            if tot <= 0
-                meta.flrPct = NaN;
-                meta.removeFracPct = NaN;
-                meta.safetyTag = "n/a";
-                return;
-            end
-            meta.flrPct = 100 * meta.keepVolumeCm3 / tot;
-            meta.removeFracPct = 100 * meta.removeVolumeCm3 / tot;
-            if meta.flrPct >= 40
-                meta.safetyTag = "LIKELY SAFE (FLR >= 40 %)";
-            elseif meta.flrPct >= 30
-                meta.safetyTag = "ACCEPTABLE (FLR 30-40 %)";
-            elseif meta.flrPct >= 25
-                meta.safetyTag = "BORDERLINE (FLR 25-30 %, full workup)";
-            else
-                meta.safetyTag = "HIGH RISK (FLR < 25 %, likely unsafe)";
-            end
-        end
-
         % ================ Slice / rendering ============================
 
         function onSliceChange(app, val)
@@ -1322,7 +963,6 @@ classdef KWODApp < handle
             showLiver = ~isempty(app.ShowLiverCb) && app.ShowLiverCb.Value;
             showLesion = ~isempty(app.ShowLesionCb) && app.ShowLesionCb.Value;
             showRef = ~isempty(app.ShowRefCb) && app.ShowRefCb.Value;
-            showResection = ~isempty(app.ShowResectionCb) && app.ShowResectionCb.Value;
 
             if showLiver && ~isempty(app.MaskLiver) && z <= size(app.MaskLiver, 1)
                 overlayMask(app.Ax, squeeze(app.MaskLiver(z, :, :)), ...
@@ -1331,18 +971,6 @@ classdef KWODApp < handle
             if showLesion && ~isempty(app.MaskLesion) && z <= size(app.MaskLesion, 1)
                 overlayMask(app.Ax, squeeze(app.MaskLesion(z, :, :)), ...
                     app.LesionColor, app.LesionAlpha);
-            end
-
-            if showResection && ~isempty(app.ResectionRemoveMask) && ...
-                    z <= size(app.ResectionRemoveMask, 1)
-                overlayMask(app.Ax, squeeze(app.ResectionRemoveMask(z, :, :)), ...
-                    app.ResectionRemoveColor, app.ResectionRemoveAlpha);
-            end
-            if showResection && isfield(app.ResectionPlane, "points")
-                pts = app.ResectionPlane.points;  % [y1 x1; y2 x2]
-                plot(app.Ax, [pts(1, 2), pts(2, 2)], [pts(1, 1), pts(2, 1)], "-", ...
-                    "Color", app.ResectionLineColor, ...
-                    "LineWidth", 2.5);
             end
 
             if showRef
@@ -1460,47 +1088,6 @@ classdef KWODApp < handle
                     metrics.lesionPercentOfLiver);
             end
 
-            % --- Resection -----------------------------------------------
-            if isfield(app.ResectionMeta, "removeVolumeCm3") && ...
-                    (app.ResectionMeta.removeVolumeCm3 > 0 || ...
-                     app.ResectionMeta.keepVolumeCm3 > 0)
-                rm = app.ResectionMeta.removeVolumeCm3;
-                kp = app.ResectionMeta.keepVolumeCm3;
-                tot = max(rm + kp, eps);
-                if isfield(app.ResectionPlane, "points")
-                    mode = "planar (line cut, extruded along Z)";
-                else
-                    mode = sprintf("volumetric (%d freehand keyframes)", ...
-                        numel(app.ResectionKeyframes));
-                end
-                lines(end + 1, 1) = "--- Virtual resection ---";
-                lines(end + 1, 1) = sprintf("Mode: %s", mode);
-                lines(end + 1, 1) = sprintf( ...
-                    "Remove (resect): %.2f cm^3 (%.1f %%) | %d voxels", ...
-                    rm, 100 * rm / tot, app.ResectionMeta.removeVoxels);
-                lines(end + 1, 1) = sprintf( ...
-                    "Keep (FLR):      %.2f cm^3 (%.1f %%) | %d voxels", ...
-                    kp, 100 * kp / tot, app.ResectionMeta.keepVoxels);
-                if isfield(app.ResectionMeta, "safetyTag")
-                    lines(end + 1, 1) = sprintf( ...
-                        "Safety: %s", app.ResectionMeta.safetyTag);
-                    lines(end + 1, 1) = ...
-                        "  (FLR criterion: >= 25-30 % normal liver, >= 40 % if pathologic. Educational only.)";
-                end
-                if any(app.MaskLesion, "all")
-                    lesionInRemove = nnz(app.MaskLesion & app.ResectionRemoveMask);
-                    lesionInKeep = nnz(app.MaskLesion & app.ResectionKeepMask);
-                    totLesion = lesionInRemove + lesionInKeep;
-                    vox = metrics.voxelVolumeCm3;
-                    if totLesion > 0
-                        lines(end + 1, 1) = sprintf( ...
-                            "Lesion: removed %.2f cm^3 (%.1f %%) | remaining %.2f cm^3", ...
-                            lesionInRemove * vox, 100 * lesionInRemove / totLesion, ...
-                            lesionInKeep * vox);
-                    end
-                end
-            end
-
             % --- Reference / Dice ----------------------------------------
             if ~isempty(app.RefLiver) || ~isempty(app.RefLesion)
                 vox = metrics.voxelVolumeCm3;
@@ -1580,9 +1167,6 @@ classdef KWODApp < handle
             end
             if ismember(app.CurrentZ, app.LesionKeyframes)
                 mark = mark + "  *E";
-            end
-            if ismember(app.CurrentZ, app.ResectionKeyframes)
-                mark = mark + "  *R";
             end
             app.SliceLabel.Text = sprintf("%d / %d%s", ...
                 app.CurrentZ, app.Study.shapeZYX(1), mark);

@@ -1,5 +1,15 @@
-# IRCAD / DICOM datasets (large; keep local only)
-3Dircadb1/
+# IRCAD / DICOM datasets — keep only selected cases in repo
+3Dircadb1/*
+!3Dircadb1/3Dircadb1/
+3Dircadb1/3Dircadb1/*
+!3Dircadb1/3Dircadb1/3Dircadb1.1/
+!3Dircadb1/3Dircadb1/3Dircadb1.2/
+!3Dircadb1/3Dircadb1/3Dircadb1.1/**
+!3Dircadb1/3Dircadb1/3Dircadb1.2/**
+
+# Build / temp artifacts
+_tools/frames/
+_tools/*_log.txt
 
 # MATLAB
 *.asv
